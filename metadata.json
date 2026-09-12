@@ -1,5 +1,5 @@
 {
-  "name": "LeadPilot",
+  "name": "VectorPilot",
   "description": "Production-quality SaaS MVP for AI-assisted lead management with PostgreSQL, REST API, and responsive dashboard.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

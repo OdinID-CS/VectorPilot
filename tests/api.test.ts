@@ -5,7 +5,7 @@ import { createApp } from '../src/app.ts';
 import { pool } from '../src/db/index.ts';
 import type { ApiResponse, Lead } from '../shared/types.ts';
 
-describe('LeadPilot REST API Endpoints', () => {
+describe('VectorPilot REST API Endpoints', () => {
   let server: Server;
   let baseUrl: string;
 

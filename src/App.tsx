@@ -119,7 +119,7 @@ export default function App() {
   const statusOptions = useMemo(() => ['ALL', ...Object.values(LeadStatus)], []);
 
   return (
-    <div id="leadpilot-app" className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+    <div id="vectorpilot-app" className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
       {/* Top Navbar */}
       <Navbar
         onAddLead={() => {

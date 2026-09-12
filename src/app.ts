@@ -12,7 +12,7 @@ export function createApp() {
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
-      service: 'LeadPilot API',
+      service: 'VectorPilot API',
       timestamp: new Date().toISOString(),
     });
   });
