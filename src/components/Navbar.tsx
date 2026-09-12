@@ -19,12 +19,12 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="w-9 h-9 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-lg shadow-sm">
-            VP
+            LP
           </div>
           <div>
             <div className="flex items-center space-x-2">
               <h1 id="brand-title" className="text-lg font-semibold text-slate-900 tracking-tight">
-                VectorPilot
+                LeadPilot
               </h1>
               <span id="mvp-badge" className="text-xs px-2 py-0.5 rounded font-medium bg-slate-100 text-slate-700 border border-slate-200">
                 MVP

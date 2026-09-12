@@ -2,14 +2,14 @@ import type { ILeadRepository } from '../repositories/lead.repository.ts';
 import { leadRepository } from '../repositories/lead.repository.ts';
 import type { LeadRecord } from '../db/schema.ts';
 import { LeadStatus, type Lead, type CreateLeadDTO, type UpdateLeadDTO, type LeadFilterQuery } from '../../shared/types.ts';
-import { NotFoundError, ConflictError, ValidationError } from '../errors/app.errors.ts';
+import { NotFoundError, ConflictError, ValidationError, ForbiddenError } from '../errors/app.errors.ts';
 
 export interface ILeadService {
-  getLeads(filters?: LeadFilterQuery): Promise<Lead[]>;
-  getLeadById(id: number): Promise<Lead>;
-  createLead(dto: CreateLeadDTO): Promise<Lead>;
-  updateLead(id: number, dto: UpdateLeadDTO): Promise<Lead>;
-  deleteLead(id: number): Promise<void>;
+  getLeads(organizationId: number, filters?: LeadFilterQuery): Promise<Lead[]>;
+  getLeadById(organizationId: number, id: number): Promise<Lead>;
+  createLead(organizationId: number, userId: number, dto: CreateLeadDTO): Promise<Lead>;
+  updateLead(organizationId: number, id: number, dto: UpdateLeadDTO): Promise<Lead>;
+  deleteLead(organizationId: number, id: number): Promise<void>;
 }
 
 export class LeadService implements ILeadService {
@@ -29,29 +29,35 @@ export class LeadService implements ILeadService {
       notes: record.notes,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
+      organizationId: record.organizationId,
+      createdById: record.createdById,
     };
   }
 
-  async getLeads(filters?: LeadFilterQuery): Promise<Lead[]> {
-    const records = await this.repo.findAll(filters);
+  async getLeads(organizationId: number, filters?: LeadFilterQuery): Promise<Lead[]> {
+    const records = await this.repo.findAll(organizationId, filters);
     return records.map(record => this.mapRecordToDomain(record));
   }
 
-  async getLeadById(id: number): Promise<Lead> {
-    const record = await this.repo.findById(id);
+  async getLeadById(organizationId: number, id: number): Promise<Lead> {
+    const record = await this.repo.findById(organizationId, id);
     if (!record) {
+      const existsInSystem = await this.repo.existsInAnyOrganization(id);
+      if (existsInSystem) {
+        throw new ForbiddenError(`Access denied: You do not have permission to access lead ${id}`);
+      }
       throw new NotFoundError(`Lead with ID ${id} not found`);
     }
     return this.mapRecordToDomain(record);
   }
 
-  async createLead(dto: CreateLeadDTO): Promise<Lead> {
+  async createLead(organizationId: number, userId: number, dto: CreateLeadDTO): Promise<Lead> {
     const normalizedEmail = dto.email.trim().toLowerCase();
 
-    // Prevent duplicate lead submission by email
-    const existing = await this.repo.findByEmail(normalizedEmail);
+    // Prevent duplicate lead submission by email within the same organization
+    const existing = await this.repo.findByEmail(organizationId, normalizedEmail);
     if (existing) {
-      throw new ConflictError(`A lead with email "${normalizedEmail}" already exists`);
+      throw new ConflictError(`A lead with email "${normalizedEmail}" already exists in this organization`);
     }
 
     // Business validation: Score range
@@ -60,7 +66,7 @@ export class LeadService implements ILeadService {
       throw new ValidationError('Lead score must be between 0 and 100');
     }
 
-    const createdRecord = await this.repo.create({
+    const createdRecord = await this.repo.create(organizationId, {
       firstName: dto.firstName.trim(),
       lastName: dto.lastName.trim(),
       email: normalizedEmail,
@@ -70,23 +76,28 @@ export class LeadService implements ILeadService {
       status: dto.status || LeadStatus.NEW,
       score,
       notes: dto.notes?.trim() || null,
+      createdById: userId,
     });
 
     return this.mapRecordToDomain(createdRecord);
   }
 
-  async updateLead(id: number, dto: UpdateLeadDTO): Promise<Lead> {
-    const existing = await this.repo.findById(id);
+  async updateLead(organizationId: number, id: number, dto: UpdateLeadDTO): Promise<Lead> {
+    const existing = await this.repo.findById(organizationId, id);
     if (!existing) {
+      const existsInSystem = await this.repo.existsInAnyOrganization(id);
+      if (existsInSystem) {
+        throw new ForbiddenError(`Access denied: You do not have permission to modify lead ${id}`);
+      }
       throw new NotFoundError(`Lead with ID ${id} not found`);
     }
 
     if (dto.email) {
       const normalizedEmail = dto.email.trim().toLowerCase();
       if (normalizedEmail !== existing.email.toLowerCase()) {
-        const leadWithEmail = await this.repo.findByEmail(normalizedEmail);
+        const leadWithEmail = await this.repo.findByEmail(organizationId, normalizedEmail);
         if (leadWithEmail && leadWithEmail.id !== id) {
-          throw new ConflictError(`A lead with email "${normalizedEmail}" already exists`);
+          throw new ConflictError(`A lead with email "${normalizedEmail}" already exists in this organization`);
         }
       }
     }
@@ -95,7 +106,7 @@ export class LeadService implements ILeadService {
       throw new ValidationError('Lead score must be between 0 and 100');
     }
 
-    const updatedRecord = await this.repo.update(id, {
+    const updatedRecord = await this.repo.update(organizationId, id, {
       ...(dto.firstName !== undefined && { firstName: dto.firstName.trim() }),
       ...(dto.lastName !== undefined && { lastName: dto.lastName.trim() }),
       ...(dto.email !== undefined && { email: dto.email.trim().toLowerCase() }),
@@ -114,13 +125,17 @@ export class LeadService implements ILeadService {
     return this.mapRecordToDomain(updatedRecord);
   }
 
-  async deleteLead(id: number): Promise<void> {
-    const existing = await this.repo.findById(id);
+  async deleteLead(organizationId: number, id: number): Promise<void> {
+    const existing = await this.repo.findById(organizationId, id);
     if (!existing) {
+      const existsInSystem = await this.repo.existsInAnyOrganization(id);
+      if (existsInSystem) {
+        throw new ForbiddenError(`Access denied: You do not have permission to delete lead ${id}`);
+      }
       throw new NotFoundError(`Lead with ID ${id} not found`);
     }
 
-    const deleted = await this.repo.delete(id);
+    const deleted = await this.repo.delete(organizationId, id);
     if (!deleted) {
       throw new NotFoundError(`Lead with ID ${id} not found`);
     }

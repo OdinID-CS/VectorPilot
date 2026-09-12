@@ -1,10 +1,26 @@
-import type { Lead, CreateLeadDTO, UpdateLeadDTO, LeadFilterQuery, ApiResponse } from '../../shared/types.ts';
+import type { Lead, CreateLeadDTO, UpdateLeadDTO, LeadFilterQuery, ApiResponse, LeadQualificationResult } from '../../shared/types.ts';
+
+let currentAuthToken = 'leadpilot_demo_token_acme_2026';
+
+export const setAuthToken = (token: string) => {
+  currentAuthToken = token;
+};
+
+export const getAuthToken = () => currentAuthToken;
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (currentAuthToken) {
+    headers['Authorization'] = `Bearer ${currentAuthToken}`;
+  }
+
   const res = await fetch(url, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...headers,
       ...options?.headers,
     },
   });
@@ -59,6 +75,12 @@ export const api = {
   async deleteLead(id: number): Promise<{ message: string; id: number }> {
     return request<{ message: string; id: number }>(`/api/leads/${id}`, {
       method: 'DELETE',
+    });
+  },
+
+  async qualifyLead(id: number): Promise<LeadQualificationResult> {
+    return request<LeadQualificationResult>(`/api/leads/${id}/qualify`, {
+      method: 'POST',
     });
   },
 };

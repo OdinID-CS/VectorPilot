@@ -1,20 +1,26 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { ILeadService } from '../services/lead.service.ts';
 import { leadService } from '../services/lead.service.ts';
+import type { IAILeadQualifier } from '../services/ai-lead-qualifier.service.ts';
+import { aiLeadQualifierService } from '../services/ai-lead-qualifier.service.ts';
 import {
   createLeadSchema,
   updateLeadSchema,
   leadIdParamSchema,
   leadFilterQuerySchema,
 } from '../validators/lead.validator.ts';
-import { AppError } from '../errors/app.errors.ts';
-import type { ApiResponse, Lead } from '../../shared/types.ts';
+import type { ApiResponse, Lead, LeadQualificationResult } from '../../shared/types.ts';
+import type { AuthenticatedRequest } from '../middleware/auth.middleware.ts';
 
 export class LeadController {
-  constructor(private readonly service: ILeadService = leadService) {}
+  constructor(
+    private readonly service: ILeadService = leadService,
+    private readonly aiQualifier: IAILeadQualifier = aiLeadQualifierService
+  ) {}
 
   getLeads = async (req: Request, res: Response<ApiResponse<Lead[]>>, next: NextFunction): Promise<void> => {
     try {
+      const { organizationId } = (req as AuthenticatedRequest).user;
       const parsedQuery = leadFilterQuerySchema.safeParse(req.query);
       if (!parsedQuery.success) {
         res.status(400).json({
@@ -28,7 +34,7 @@ export class LeadController {
         return;
       }
 
-      const leads = await this.service.getLeads(parsedQuery.data);
+      const leads = await this.service.getLeads(organizationId, parsedQuery.data);
       res.status(200).json({
         success: true,
         data: leads,
@@ -40,6 +46,7 @@ export class LeadController {
 
   getLeadById = async (req: Request, res: Response<ApiResponse<Lead>>, next: NextFunction): Promise<void> => {
     try {
+      const { organizationId } = (req as AuthenticatedRequest).user;
       const parsedParams = leadIdParamSchema.safeParse(req.params);
       if (!parsedParams.success) {
         res.status(400).json({
@@ -53,7 +60,7 @@ export class LeadController {
         return;
       }
 
-      const lead = await this.service.getLeadById(parsedParams.data.id);
+      const lead = await this.service.getLeadById(organizationId, parsedParams.data.id);
       res.status(200).json({
         success: true,
         data: lead,
@@ -65,6 +72,7 @@ export class LeadController {
 
   createLead = async (req: Request, res: Response<ApiResponse<Lead>>, next: NextFunction): Promise<void> => {
     try {
+      const { organizationId, id: userId } = (req as AuthenticatedRequest).user;
       const parsedBody = createLeadSchema.safeParse(req.body);
       if (!parsedBody.success) {
         res.status(400).json({
@@ -78,7 +86,7 @@ export class LeadController {
         return;
       }
 
-      const createdLead = await this.service.createLead(parsedBody.data);
+      const createdLead = await this.service.createLead(organizationId, userId, parsedBody.data);
       res.status(201).json({
         success: true,
         data: createdLead,
@@ -90,6 +98,7 @@ export class LeadController {
 
   updateLead = async (req: Request, res: Response<ApiResponse<Lead>>, next: NextFunction): Promise<void> => {
     try {
+      const { organizationId } = (req as AuthenticatedRequest).user;
       const parsedParams = leadIdParamSchema.safeParse(req.params);
       if (!parsedParams.success) {
         res.status(400).json({
@@ -116,7 +125,7 @@ export class LeadController {
         return;
       }
 
-      const updatedLead = await this.service.updateLead(parsedParams.data.id, parsedBody.data);
+      const updatedLead = await this.service.updateLead(organizationId, parsedParams.data.id, parsedBody.data);
       res.status(200).json({
         success: true,
         data: updatedLead,
@@ -128,6 +137,7 @@ export class LeadController {
 
   deleteLead = async (req: Request, res: Response<ApiResponse<{ message: string; id: number }>>, next: NextFunction): Promise<void> => {
     try {
+      const { organizationId } = (req as AuthenticatedRequest).user;
       const parsedParams = leadIdParamSchema.safeParse(req.params);
       if (!parsedParams.success) {
         res.status(400).json({
@@ -141,7 +151,7 @@ export class LeadController {
         return;
       }
 
-      await this.service.deleteLead(parsedParams.data.id);
+      await this.service.deleteLead(organizationId, parsedParams.data.id);
       res.status(200).json({
         success: true,
         data: {
@@ -153,37 +163,38 @@ export class LeadController {
       next(error);
     }
   };
+
+  qualifyLead = async (
+    req: Request,
+    res: Response<ApiResponse<LeadQualificationResult>>,
+    next: NextFunction
+  ): Promise<void> => {
+    try {
+      const { organizationId } = (req as AuthenticatedRequest).user;
+      const parsedParams = leadIdParamSchema.safeParse(req.params);
+      if (!parsedParams.success) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_ID',
+            message: 'Lead ID must be a positive integer',
+            details: parsedParams.error.format(),
+          },
+        });
+        return;
+      }
+
+      const lead = await this.service.getLeadById(organizationId, parsedParams.data.id);
+      const qualification = await this.aiQualifier.qualifyLead(lead);
+
+      res.status(200).json({
+        success: true,
+        data: qualification,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
 }
 
 export const leadController = new LeadController();
-
-export function errorHandler(
-  err: unknown,
-  req: Request,
-  res: Response<ApiResponse<never>>,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  next: NextFunction
-): void {
-  console.error('Unhandled request error:', err);
-
-  if (err instanceof AppError) {
-    res.status(err.statusCode).json({
-      success: false,
-      error: {
-        code: err.code,
-        message: err.message,
-        details: err.details,
-      },
-    });
-    return;
-  }
-
-  // Safe fallback to avoid leaking database internals or stack trace
-  res.status(500).json({
-    success: false,
-    error: {
-      code: 'INTERNAL_SERVER_ERROR',
-      message: 'An unexpected server error occurred',
-    },
-  });
-}

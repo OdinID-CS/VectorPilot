@@ -86,7 +86,7 @@ export const LeadTable: React.FC<LeadTableProps> = ({
                       value={lead.status}
                       onChange={(e) => onStatusChange(lead.id, e.target.value as LeadStatus)}
                       aria-label={`Update status for ${lead.firstName} ${lead.lastName}`}
-                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer z-10"
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer z-10 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1 rounded-md text-xs bg-white text-slate-800"
                     >
                       {Object.values(LeadStatus).map((status) => (
                         <option key={status} value={status}>

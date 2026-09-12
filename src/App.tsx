@@ -323,6 +323,10 @@ export default function App() {
           setIsModalOpen(true);
         }}
         onDelete={handleDeleteLead}
+        onLeadUpdated={(updated) => {
+          setViewingLead(updated);
+          setLeads((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+        }}
       />
     </div>
   );

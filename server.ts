@@ -23,7 +23,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`VectorPilot server running on http://0.0.0.0:${PORT}`);
+    console.log(`LeadPilot server running on http://0.0.0.0:${PORT}`);
   });
 }
 

@@ -31,6 +31,18 @@ export class ValidationError extends AppError {
   }
 }
 
+export class UnauthorizedError extends AppError {
+  constructor(message: string = 'Authentication required', details?: unknown) {
+    super(message, 401, 'UNAUTHORIZED', details);
+  }
+}
+
+export class ForbiddenError extends AppError {
+  constructor(message: string = 'Access denied', details?: unknown) {
+    super(message, 403, 'FORBIDDEN', details);
+  }
+}
+
 export class DatabaseError extends AppError {
   constructor(message: string = 'Database operation failed', details?: unknown) {
     super(message, 500, 'DATABASE_ERROR', details);

@@ -6,6 +6,21 @@ export enum LeadStatus {
   LOST = 'LOST',
 }
 
+export interface Organization {
+  id: number;
+  name: string;
+  slug: string;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
+export interface AuthUser {
+  id: number;
+  email: string;
+  name: string;
+  organizationId: number;
+}
+
 export interface Lead {
   id: number;
   firstName: string;
@@ -19,6 +34,8 @@ export interface Lead {
   notes: string | null;
   createdAt: string | Date;
   updatedAt: string | Date;
+  organizationId: number;
+  createdById?: number | null;
 }
 
 export interface CreateLeadDTO {
@@ -62,4 +79,15 @@ export interface ApiResponse<T> {
     message: string;
     details?: unknown;
   };
+}
+
+export type LeadClassification = 'HOT' | 'WARM' | 'COLD' | 'UNQUALIFIED';
+
+export interface LeadQualificationResult {
+  classification: LeadClassification;
+  reasoning: string;
+  recommendedAction: string;
+  confidence: number;
+  isFallback?: boolean;
+  fallbackReason?: string;
 }

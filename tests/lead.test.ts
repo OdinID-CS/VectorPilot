@@ -9,26 +9,34 @@ import { LeadService } from '../src/services/lead.service.ts';
 import type { ILeadRepository } from '../src/repositories/lead.repository.ts';
 import type { LeadRecord, NewLeadRecord } from '../src/db/schema.ts';
 import { LeadStatus } from '../shared/types.ts';
-import { ConflictError, NotFoundError, ValidationError } from '../src/errors/app.errors.ts';
+import { ConflictError, NotFoundError, ValidationError, ForbiddenError } from '../src/errors/app.errors.ts';
 
-// In-Memory Repository for isolated unit tests of business logic
+// In-Memory Repository for isolated unit tests of business logic and tenant isolation
 class MockLeadRepository implements ILeadRepository {
   private leads: LeadRecord[] = [];
   private nextId = 1;
 
-  async findAll(): Promise<LeadRecord[]> {
-    return [...this.leads];
+  async findAll(organizationId: number): Promise<LeadRecord[]> {
+    return this.leads.filter(l => l.organizationId === organizationId);
   }
 
-  async findById(id: number): Promise<LeadRecord | null> {
-    return this.leads.find(l => l.id === id) || null;
+  async findById(organizationId: number, id: number): Promise<LeadRecord | null> {
+    return this.leads.find(l => l.organizationId === organizationId && l.id === id) || null;
   }
 
-  async findByEmail(email: string): Promise<LeadRecord | null> {
-    return this.leads.find(l => l.email.toLowerCase() === email.toLowerCase()) || null;
+  async findByEmail(organizationId: number, email: string): Promise<LeadRecord | null> {
+    return (
+      this.leads.find(
+        l => l.organizationId === organizationId && l.email.toLowerCase() === email.toLowerCase()
+      ) || null
+    );
   }
 
-  async create(data: NewLeadRecord): Promise<LeadRecord> {
+  async existsInAnyOrganization(id: number): Promise<boolean> {
+    return this.leads.some(l => l.id === id);
+  }
+
+  async create(organizationId: number, data: Omit<NewLeadRecord, 'organizationId'>): Promise<LeadRecord> {
     const record: LeadRecord = {
       id: this.nextId++,
       firstName: data.firstName,
@@ -40,6 +48,8 @@ class MockLeadRepository implements ILeadRepository {
       status: data.status ?? 'NEW',
       score: data.score ?? 0,
       notes: data.notes ?? null,
+      organizationId,
+      createdById: data.createdById ?? null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -47,23 +57,24 @@ class MockLeadRepository implements ILeadRepository {
     return record;
   }
 
-  async update(id: number, data: Partial<NewLeadRecord>): Promise<LeadRecord | null> {
-    const index = this.leads.findIndex(l => l.id === id);
+  async update(organizationId: number, id: number, data: Partial<NewLeadRecord>): Promise<LeadRecord | null> {
+    const index = this.leads.findIndex(l => l.organizationId === organizationId && l.id === id);
     if (index === -1) return null;
 
     const existing = this.leads[index];
+    const { organizationId: _ignored, ...safeData } = data;
     const updated: LeadRecord = {
       ...existing,
-      ...data,
+      ...safeData,
       updatedAt: new Date(),
     };
     this.leads[index] = updated;
     return updated;
   }
 
-  async delete(id: number): Promise<boolean> {
+  async delete(organizationId: number, id: number): Promise<boolean> {
     const initialLen = this.leads.length;
-    this.leads = this.leads.filter(l => l.id !== id);
+    this.leads = this.leads.filter(l => !(l.organizationId === organizationId && l.id === id));
     return this.leads.length < initialLen;
   }
 }
@@ -139,12 +150,17 @@ describe('Lead Validation Layer', () => {
   });
 });
 
-describe('Lead Service & Business Logic Layer', () => {
-  it('creates a lead successfully', async () => {
+describe('Lead Service & Multi-Tenant Authorization Layer', () => {
+  const ORG_1 = 1;
+  const USER_1 = 10;
+  const ORG_2 = 2;
+  const USER_2 = 20;
+
+  it('creates a lead successfully with organization ownership', async () => {
     const repo = new MockLeadRepository();
     const service = new LeadService(repo);
 
-    const lead = await service.createLead({
+    const lead = await service.createLead(ORG_1, USER_1, {
       firstName: 'Sarah',
       lastName: 'Connor',
       email: 'sarah@resistance.org',
@@ -157,13 +173,15 @@ describe('Lead Service & Business Logic Layer', () => {
     assert.equal(lead.firstName, 'Sarah');
     assert.equal(lead.email, 'sarah@resistance.org');
     assert.equal(lead.status, LeadStatus.QUALIFIED);
+    assert.equal(lead.organizationId, ORG_1);
+    assert.equal(lead.createdById, USER_1);
   });
 
-  it('prevents duplicate submissions with the same email (ConflictError 409)', async () => {
+  it('prevents duplicate submissions with the same email within the same organization', async () => {
     const repo = new MockLeadRepository();
     const service = new LeadService(repo);
 
-    await service.createLead({
+    await service.createLead(ORG_1, USER_1, {
       firstName: 'Sarah',
       lastName: 'Connor',
       email: 'sarah@resistance.org',
@@ -171,10 +189,10 @@ describe('Lead Service & Business Logic Layer', () => {
 
     await assert.rejects(
       async () => {
-        await service.createLead({
+        await service.createLead(ORG_1, USER_1, {
           firstName: 'Another',
           lastName: 'Sarah',
-          email: 'SARAH@resistance.org', // Case-insensitive duplicate
+          email: 'SARAH@resistance.org', // Case-insensitive duplicate in Org 1
         });
       },
       (err: unknown) => {
@@ -185,23 +203,74 @@ describe('Lead Service & Business Logic Layer', () => {
     );
   });
 
-  it('fetches lead by ID and throws NotFoundError for unknown IDs', async () => {
+  it('allows identical lead email across different organizations', async () => {
     const repo = new MockLeadRepository();
     const service = new LeadService(repo);
 
-    const created = await service.createLead({
+    const lead1 = await service.createLead(ORG_1, USER_1, {
+      firstName: 'Sarah',
+      lastName: 'Connor',
+      email: 'sarah@universal.org',
+    });
+
+    const lead2 = await service.createLead(ORG_2, USER_2, {
+      firstName: 'Sarah',
+      lastName: 'Connor',
+      email: 'sarah@universal.org', // Same email in Org 2
+    });
+
+    assert.equal(lead1.organizationId, ORG_1);
+    assert.equal(lead2.organizationId, ORG_2);
+    assert.notEqual(lead1.id, lead2.id);
+  });
+
+  it('allows authenticated user to access own organization lead', async () => {
+    const repo = new MockLeadRepository();
+    const service = new LeadService(repo);
+
+    const created = await service.createLead(ORG_1, USER_1, {
       firstName: 'Alex',
       lastName: 'Murphy',
       email: 'alex@ocp.com',
     });
 
-    const found = await service.getLeadById(created.id);
+    const found = await service.getLeadById(ORG_1, created.id);
     assert.equal(found.id, created.id);
     assert.equal(found.firstName, 'Alex');
+    assert.equal(found.organizationId, ORG_1);
+  });
+
+  it('rejects authenticated user attempting another organization lead with ForbiddenError (403)', async () => {
+    const repo = new MockLeadRepository();
+    const service = new LeadService(repo);
+
+    // Lead belongs to ORG_1
+    const createdOrg1 = await service.createLead(ORG_1, USER_1, {
+      firstName: 'Alex',
+      lastName: 'Murphy',
+      email: 'alex@ocp.com',
+    });
+
+    // User in ORG_2 attempts to access ORG_1 lead
+    await assert.rejects(
+      async () => {
+        await service.getLeadById(ORG_2, createdOrg1.id);
+      },
+      (err: unknown) => {
+        assert.ok(err instanceof ForbiddenError);
+        assert.equal(err.statusCode, 403);
+        return true;
+      }
+    );
+  });
+
+  it('returns NotFoundError (404) for lead that does not exist anywhere', async () => {
+    const repo = new MockLeadRepository();
+    const service = new LeadService(repo);
 
     await assert.rejects(
       async () => {
-        await service.getLeadById(999);
+        await service.getLeadById(ORG_1, 999999);
       },
       (err: unknown) => {
         assert.ok(err instanceof NotFoundError);
@@ -211,61 +280,67 @@ describe('Lead Service & Business Logic Layer', () => {
     );
   });
 
-  it('updates lead fields and handles email uniqueness', async () => {
+  it('enforces tenant isolation on update (cannot update another org lead)', async () => {
     const repo = new MockLeadRepository();
     const service = new LeadService(repo);
 
-    const lead1 = await service.createLead({
+    const org1Lead = await service.createLead(ORG_1, USER_1, {
       firstName: 'Lead',
-      lastName: 'One',
-      email: 'one@test.com',
+      lastName: 'Org1',
+      email: 'lead1@test.com',
       score: 10,
     });
 
-    const lead2 = await service.createLead({
-      firstName: 'Lead',
-      lastName: 'Two',
-      email: 'two@test.com',
-      score: 20,
-    });
-
-    // Update status and score
-    const updated = await service.updateLead(lead1.id, {
-      status: LeadStatus.CONTACTED,
-      score: 60,
-    });
-    assert.equal(updated.status, LeadStatus.CONTACTED);
-    assert.equal(updated.score, 60);
-
-    // Attempting to update lead2 email to lead1 email should throw ConflictError
+    // User in ORG_2 attempts to update ORG_1 lead
     await assert.rejects(
       async () => {
-        await service.updateLead(lead2.id, {
-          email: 'one@test.com',
+        await service.updateLead(ORG_2, org1Lead.id, {
+          score: 80,
         });
       },
       (err: unknown) => {
-        assert.ok(err instanceof ConflictError);
+        assert.ok(err instanceof ForbiddenError);
+        assert.equal(err.statusCode, 403);
         return true;
       }
     );
+
+    // User in ORG_1 can update successfully
+    const updated = await service.updateLead(ORG_1, org1Lead.id, {
+      score: 80,
+    });
+    assert.equal(updated.score, 80);
   });
 
-  it('deletes lead and throws NotFoundError for subsequent operations', async () => {
+  it('enforces tenant isolation on delete (cannot delete another org lead)', async () => {
     const repo = new MockLeadRepository();
     const service = new LeadService(repo);
 
-    const lead = await service.createLead({
+    const org1Lead = await service.createLead(ORG_1, USER_1, {
       firstName: 'Temp',
-      lastName: 'User',
+      lastName: 'Lead',
       email: 'temp@test.com',
     });
 
-    await service.deleteLead(lead.id);
-
+    // User in ORG_2 attempts to delete ORG_1 lead
     await assert.rejects(
       async () => {
-        await service.getLeadById(lead.id);
+        await service.deleteLead(ORG_2, org1Lead.id);
+      },
+      (err: unknown) => {
+        assert.ok(err instanceof ForbiddenError);
+        assert.equal(err.statusCode, 403);
+        return true;
+      }
+    );
+
+    // User in ORG_1 can delete successfully
+    await service.deleteLead(ORG_1, org1Lead.id);
+
+    // Subsequent get throws NotFoundError
+    await assert.rejects(
+      async () => {
+        await service.getLeadById(ORG_1, org1Lead.id);
       },
       (err: unknown) => {
         assert.ok(err instanceof NotFoundError);

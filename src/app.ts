@@ -1,6 +1,6 @@
 import express from 'express';
 import { leadRouter } from './routes/lead.routes.ts';
-import { errorHandler } from './controllers/lead.controller.ts';
+import { errorHandler } from './middleware/error.middleware.ts';
 
 export function createApp() {
   const app = express();
@@ -12,7 +12,7 @@ export function createApp() {
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
-      service: 'VectorPilot API',
+      service: 'LeadPilot API',
       timestamp: new Date().toISOString(),
     });
   });
